@@ -2,9 +2,11 @@ pipeline {
     agent any
 
     environment {
-        AZ_ACCOUNT = 'afyabutstorage'
-        AZ_SHARE   = 'afyabutshare'
-        ACI_URL    = 'afyabutaci.centralindia.azurecontainer.io'
+        AZ_ACCOUNT  = 'afyabutstorage'
+        AZ_SHARE    = 'afyabutshare'
+        STAGING_URL = 'http://afyabutaci.centralindia.azurecontainer.io'
+        SERVER1     = '10.0.4.195'
+        SERVER2     = '10.0.3.108'
     }
 
     stages {
@@ -34,26 +36,45 @@ pipeline {
         stage('Staging Test') {
             steps {
                 sh '''
-                    curl -f $ACI_URL
+                    echo "Checking staging endpoint..."
 
-                    curl -s $ACI_URL | grep "Hello"
+                    curl -f "$STAGING_URL"
 
-                    # Uncomment this line to simulate a failed test
-                    # exit 1
+                    echo "Checking page content..."
+
+                    curl -s "$STAGING_URL" | grep "Jenkins CI/CD Demo Success!"
                 '''
             }
         }
 
         stage('Deploy to Production') {
             steps {
-               sh '''
-                scp -o StrictHostKeyChecking=no index.html ubuntu@10.0.3.108:/tmp/index.html
-                ssh -o StrictHostKeyChecking=no ubuntu@10.0.3.108 "sudo mv /tmp/index.html /usr/share/nginx/html/index.html"
+                sshagent(credentials: ['webservers-ssh-key']) {
+                    sh '''
+                        echo "Deploying to EC2 Server 1..."
 
-                scp -o StrictHostKeyChecking=no index.html ubuntu@10.0.4.195:/tmp/index.html
-                ssh -o StrictHostKeyChecking=no ubuntu@10.0.4.195 "sudo mv /tmp/index.html /usr/share/nginx/html/index.html"
-            	'''
+                        scp -o StrictHostKeyChecking=no index.html ubuntu@$SERVER1:/tmp/index.html
+                        ssh -o StrictHostKeyChecking=no ubuntu@$SERVER1 \
+                        "sudo cp /tmp/index.html /var/www/html/index.html"
+
+                        echo "Deploying to EC2 Server 2..."
+
+                        scp -o StrictHostKeyChecking=no index.html ubuntu@$SERVER2:/tmp/index.html
+                        ssh -o StrictHostKeyChecking=no ubuntu@$SERVER2 \
+                        "sudo cp /tmp/index.html /var/www/html/index.html"
+                    '''
+                }
             }
+        }
+    }
+
+    post {
+        success {
+            echo 'Deployment completed successfully.'
+        }
+
+        failure {
+            echo 'Pipeline failed. Production deployment was blocked.'
         }
     }
 }
